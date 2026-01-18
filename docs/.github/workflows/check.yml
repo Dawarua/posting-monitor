@@ -2,8 +2,8 @@ name: Check postings
 
 on:
   schedule:
-    - cron: "35 16 * * *"  # ~18:35 Berlin (Sommer)
-    - cron: "35 17 * * *"  # ~18:35 Berlin (Winter)
+    - cron: "30 16 * * *"  # 18:30 Berlin (Sommer)
+    - cron: "30 17 * * *"  # 18:30 Berlin (Winter)
   workflow_dispatch:
 
 permissions:
