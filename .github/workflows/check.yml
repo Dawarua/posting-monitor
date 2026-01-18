@@ -35,3 +35,10 @@ jobs:
           git add docs/status.json
           git commit -m "Update status.json" || echo "No changes"
           git push
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug
+          path: debug
