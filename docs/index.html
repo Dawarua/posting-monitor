@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Posting Monitor</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:16px}
+    header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+    h1{font-size:20px;margin:0}
+    .sub{color:#555;font-size:13px;margin-top:6px}
+    .btn{display:inline-block;padding:10px 12px;border-radius:12px;border:1px solid #ddd;text-decoration:none;color:#111}
+    .card{border:1px solid #ddd;border-radius:16px;padding:12px;margin:10px 0}
+    .row{display:flex;align-items:center;gap:12px}
+    .icon{font-size:22px;width:28px;text-align:center}
+    .name{font-weight:700}
+    .meta{color:#555;font-size:13px;margin-top:4px}
+    .right{margin-left:auto;display:flex;gap:10px;align-items:center}
+    a{color:#0b57d0;text-decoration:none}
+    .pill{font-size:12px;border:1px solid #ddd;padding:3px 8px;border-radius:999px;color:#333}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Posting Monitor</h1>
+      <div class="sub" id="subtitle">Lade Status…</div>
+    </div>
+    <a class="btn" href="" id="refreshLink">Refresh</a>
+  </header>
+
+  <div id="list"></div>
+
+<script>
+  const list = document.getElementById('list');
+  const subtitle = document.getElementById('subtitle');
+  const refreshLink = document.getElementById('refreshLink');
+  refreshLink.href = location.href;
+
+  function icon(s){
+    if(s === "ok") return "✅";
+    if(s === "warn") return "⚠️";
+    return "❌";
+  }
+
+  async function run(){
+    try{
+      const res = await fetch('./status.json?ts=' + Date.now(), {cache:"no-store"});
+      const data = await res.json();
+      subtitle.textContent = `Datum (Berlin): ${data.day_berlin} · Letzter Check: ${data.checked_at_berlin} · Erwartet: ${data.expected_time_berlin}`;
+      list.innerHTML = "";
+
+      data.sources.forEach(s => {
+        const div = document.createElement('div');
+        div.className = "card";
+        div.innerHTML = `
+          <div class="row">
+            <div class="icon">${icon(s.status)}</div>
+            <div style="min-width:0">
+              <div class="name">${s.name}</div>
+              <div class="meta">
+                <span class="pill">${s.type}</span>
+                ${s.note ? " · " + s.note : ""}
+                ${s.published_at_berlin ? " · " + s.published_at_berlin : ""}
+              </div>
+            </div>
+            <div class="right">
+              ${s.latest_url ? `<a href="${s.latest_url}" target="_blank">Open</a>` : ``}
+            </div>
+          </div>
+        `;
+        list.appendChild(div);
+      });
+    }catch(e){
+      subtitle.textContent = "Fehler beim Laden von status.json";
+      list.innerHTML = `<div class="card">Fehler: ${String(e)}</div>`;
+    }
+  }
+  run();
+</script>
+</body>
+</html>
