@@ -1,6 +1,6 @@
 {
   "day_berlin": "2026-01-18",
-  "checked_at_berlin": "2026-01-18 19:28:22",
+  "checked_at_berlin": "2026-01-18 19:46:33",
   "expected_time_berlin": "2026-01-18 18:00",
   "sources": [
     {
@@ -8,10 +8,10 @@
       "name": "X @utradetoken",
       "type": "x",
       "url": "https://x.com/utradetoken",
-      "status": "missing",
-      "latest_url": "https://x.com/uTradetoken/status/1996951900780999093",
-      "published_at_berlin": "2025-12-05 15:36",
-      "note": "published time found"
+      "status": "warn",
+      "latest_url": null,
+      "published_at_berlin": null,
+      "note": "blocked/consent/login suspected"
     },
     {
       "id": "ig",
@@ -49,39 +49,39 @@
       "type": "youtube_shorts",
       "url": "https://m.youtube.com/@utradetoken/shorts",
       "status": "warn",
-      "latest_url": "https://www.youtube.com/shorts/QpotIVb3To8",
+      "latest_url": null,
       "published_at_berlin": null,
-      "note": "latest link found, no timestamp"
+      "note": "blocked/consent/login suspected"
     },
     {
       "id": "b1",
       "name": "Blog utrade.vip",
       "type": "blog",
       "url": "https://utrade.vip/blog/",
-      "status": "ok",
-      "latest_url": "https://utrade.vip/cross-into-the-future/",
-      "published_at_berlin": "2026-01-18 18:00",
-      "note": "published time found"
+      "status": "warn",
+      "latest_url": null,
+      "published_at_berlin": null,
+      "note": "blocked/consent/login suspected"
     },
     {
       "id": "b2",
       "name": "Blog umerch.store",
       "type": "blog",
       "url": "https://umerch.store/blog/",
-      "status": "ok",
-      "latest_url": "https://umerch.store/cross-into-the-future/",
-      "published_at_berlin": "2026-01-18 18:00",
-      "note": "published time found"
+      "status": "warn",
+      "latest_url": null,
+      "published_at_berlin": null,
+      "note": "blocked/consent/login suspected"
     },
     {
       "id": "b3",
       "name": "Blog utap.click",
       "type": "blog",
       "url": "https://utap.click/blog-utrade/",
-      "status": "ok",
-      "latest_url": "https://utap.click/cross-into-the-future/",
-      "published_at_berlin": "2026-01-18 18:00",
-      "note": "published time found"
+      "status": "warn",
+      "latest_url": null,
+      "published_at_berlin": null,
+      "note": "blocked/consent/login suspected"
     }
   ]
 }
