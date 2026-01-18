@@ -1,0 +1,4 @@
+playwright==1.49.1
+python-dateutil==2.9.0.post0
+pytz==2024.2
+requests==2.32.3
