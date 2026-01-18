@@ -10,8 +10,8 @@ TZ = pytz.timezone("Europe/Berlin")
 CONFIG = {
     "expected_hour": 18,
     "expected_minute": 0,
-    "tolerance_minutes": 240,  # 4h Toleranz
-    "retries": 2,              # zusätzliche Versuche bei block/timeout
+    "tolerance_minutes": 240,   # 4h Toleranz
+    "retries": 2,
     "sources": [
         {"id": "x",  "name": "X @utradetoken",              "type": "x",             "url": "https://x.com/utradetoken"},
         {"id": "ig", "name": "Instagram @utradetoken",      "type": "instagram",     "url": "https://www.instagram.com/utradetoken"},
@@ -31,20 +31,25 @@ DESKTOP_UA = (
 )
 
 CONSENT_SELECTORS = [
-    # English
+    # EN
     'button:has-text("Accept all")',
     'button:has-text("Accept All")',
     'button:has-text("Accept")',
     'button:has-text("I Agree")',
     'button:has-text("Agree")',
     'button:has-text("Allow all")',
-    # German
+    # DE
     'button:has-text("Alle akzeptieren")',
     'button:has-text("Alles akzeptieren")',
     'button:has-text("Akzeptieren")',
     'button:has-text("Zustimmen")',
     'button:has-text("Einverstanden")',
+    # generic
+    '[role="button"]:has-text("Accept")',
+    '[role="button"]:has-text("Alle akzeptieren")',
 ]
+
+DEBUG_DIR = "debug"  # wird im Runner als Artefakt gespeichert (optional im Workflow)
 
 
 def expected_window(now_berlin: datetime):
@@ -54,141 +59,247 @@ def expected_window(now_berlin: datetime):
     return expected - tol, expected + tol, expected
 
 
-def first_match(html: str, patterns):
-    for p in patterns:
-        m = re.search(p, html, re.IGNORECASE)
-        if m:
-            return m.group(1)
-    return None
-
-
-def extract_latest_url(stype: str, html: str):
-    """
-    Heuristiken: Wir versuchen jeweils den "neuesten Beitrag"-Link zu finden.
-    Das ist ohne API/Scraping-Resistenz nie 100%, aber hier möglichst robust.
-    """
-    if stype == "x":
-        m = first_match(html, [r'href="(/[^"/]+/status/\d+)"'])
-        return f"https://x.com{m}" if m else None
-
-    if stype == "instagram":
-        # /p/ oder /reel/ Links
-        m = first_match(html, [r'href="(/(p|reel)/[^"/]+/)"'])
-        return f"https://www.instagram.com{m}" if m else None
-
-    if stype == "tiktok":
-        m = first_match(html, [r'href="(/@[^"]+/video/\d+)"'])
-        return f"https://www.tiktok.com{m}" if m else None
-
-    if stype == "linkedin":
-        m = first_match(html, [
-            r'(https://www\.linkedin\.com/feed/update/urn:li:activity:\d+[^"\']*)',
-            r'(https://www\.linkedin\.com/company/[^/]+/posts/[^"\']+)'
-        ])
-        return m
-
-    if stype == "youtube_shorts":
-        m = first_match(html, [r'href="(/shorts/[^"?]+)"'])
-        return f"https://www.youtube.com{m}" if m else None
-
-    if stype == "blog":
-        m = first_match(html, [
-            r'<article[\s\S]*?<a[^>]+href="([^"]+)"',
-            r'href="([^"]+/20\d{2}/[^"]+)"'
-        ])
-        return m
-
-    return None
-
-
-def extract_published_datetime(html: str):
-    """
-    Versucht aus HTML published time zu ziehen:
-    - <time datetime="...">
-    - meta property="article:published_time"
-    - itemprop="datePublished"
-    - JSON-LD "datePublished"
-    """
-    candidates = []
-
-    for m in re.finditer(r'datetime="([^"]+)"', html, re.IGNORECASE):
-        candidates.append(m.group(1))
-
-    for m in re.finditer(r'property="article:published_time"\s+content="([^"]+)"', html, re.IGNORECASE):
-        candidates.append(m.group(1))
-
-    for m in re.finditer(r'itemprop="datePublished"\s+content="([^"]+)"', html, re.IGNORECASE):
-        candidates.append(m.group(1))
-
-    for m in re.finditer(r'"datePublished"\s*:\s*"([^"]+)"', html, re.IGNORECASE):
-        candidates.append(m.group(1))
-
-    parsed = []
-    for c in candidates[:40]:
-        try:
-            dt = dtparser.parse(c)
-            if dt.tzinfo is None:
-                dt = TZ.localize(dt)
-            else:
-                dt = dt.astimezone(TZ)
-            parsed.append(dt)
-        except Exception:
-            pass
-
-    return max(parsed) if parsed else None
-
-
-def looks_blocked(html: str):
-    """
-    Erweitert: erkennt Captcha/Consent/Login/Robots Hinweise.
-    Dadurch werden Fälle eher ⚠️ statt ❌, wenn die Seite blockt.
-    """
+def looks_blocked_text(html: str):
+    # Erkennung, ob wir eine Login/Consent/Block-Seite bekommen
     return bool(re.search(
-        r'captcha|verify|unusual traffic|robot|consent|cookie|cookies|login|log in|sign in|anmelden|einloggen|'
-        r'please enable javascript|access denied|forbidden|restricted|temporarily blocked|'
-        r'instagram|tiktok|linkedin',
+        r'captcha|verify|unusual traffic|robot|consent|cookie|cookies|'
+        r'login|log in|sign in|anmelden|einloggen|'
+        r'access denied|forbidden|temporarily blocked|'
+        r'please enable javascript',
         html,
         re.IGNORECASE
     ))
 
 
 def try_click_consent(page):
-    """
-    Versucht Cookie/Consent Banner zu akzeptieren.
-    Fehler werden ignoriert.
-    """
     for sel in CONSENT_SELECTORS:
         try:
             page.click(sel, timeout=1500)
             page.wait_for_timeout(1200)
             return True
         except Exception:
-            continue
+            pass
     return False
 
 
-def goto_with_soft_handling(page, url: str, timeout_ms: int = 30000):
-    """
-    Seite laden + kurz warten + Consent versuchen.
-    """
+def goto(page, url: str, timeout_ms: int = 45000):
+    # domcontentloaded + networkidle hilft oft bei dynamischen Seiten
     page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-    page.wait_for_timeout(3500)
+    page.wait_for_timeout(1500)
     try_click_consent(page)
+    # nach Consent nochmal warten
     page.wait_for_timeout(1500)
 
 
-def youtube_shorts_to_watch(latest_url: str):
-    """
-    Shorts URL -> watch?v=...
-    """
+def soft_scroll(page, steps=3):
+    # leichtes scrollen, damit Feeds Inhalte nachladen
+    for _ in range(steps):
+        try:
+            page.mouse.wheel(0, 1200)
+            page.wait_for_timeout(1200)
+        except Exception:
+            break
+
+
+def safe_write_debug(page, source_id: str, name: str):
+    # Debug-Screenshot + HTML dump (hilft 100% beim Nachschärfen)
     try:
-        if "/shorts/" in latest_url:
-            vid = latest_url.split("/shorts/")[1].split("?")[0].split("&")[0]
-            if vid:
-                return f"https://www.youtube.com/watch?v={vid}"
+        import os
+        os.makedirs(DEBUG_DIR, exist_ok=True)
+        page.screenshot(path=f"{DEBUG_DIR}/{source_id}_{name}.png", full_page=True)
+        with open(f"{DEBUG_DIR}/{source_id}_{name}.html", "w", encoding="utf-8") as f:
+            f.write(page.content())
+    except Exception:
+        pass
+
+
+# ---------- Plattform-spezifische "latest link" + time extraction (DOM-basiert) ----------
+
+def latest_x(page):
+    # X: warte auf Tweets oder erkenne Login
+    html = page.content()
+    if "log in" in html.lower() or "login" in html.lower() or "/i/flow/login" in html.lower():
+        return None, "blocked/consent/login suspected"
+
+    # Versuch: erstes Tweet-Article
+    try:
+        page.wait_for_selector('article[data-testid="tweet"]', timeout=8000)
+    except Exception:
+        pass
+
+    # Scroll, damit Tweets sicher geladen sind
+    soft_scroll(page, steps=2)
+
+    # Tweet Link (status/ID) aus dem ersten Article
+    try:
+        article = page.locator('article[data-testid="tweet"]').first
+        link = article.locator('a[href*="/status/"]').first.get_attribute("href")
+        if link:
+            return "https://x.com" + link.split("?")[0], "latest tweet link found"
+    except Exception:
+        pass
+
+    # Fallback regex
+    html = page.content()
+    m = re.search(r'href="(/[^"/]+/status/\d+)"', html, re.IGNORECASE)
+    if m:
+        return "https://x.com" + m.group(1), "latest tweet link (regex)"
+    return None, "no latest link found"
+
+
+def published_time_from_time_tag(page):
+    # Sehr robust: <time datetime="...">
+    try:
+        t = page.locator("time").first.get_attribute("datetime")
+        if t:
+            dt = dtparser.parse(t)
+            if dt.tzinfo is None:
+                dt = TZ.localize(dt)
+            else:
+                dt = dt.astimezone(TZ)
+            return dt
     except Exception:
         pass
     return None
+
+
+def latest_instagram(page):
+    html = page.content().lower()
+    # Wenn IG Login/Consent präsentiert, lieber WARN statt falsches ❌
+    if "login" in html or "anmelden" in html or looks_blocked_text(page.content()):
+        return None, "blocked/consent/login suspected"
+
+    # IG: Links /p/ oder /reel/ in anchor tags
+    try:
+        # kurz warten
+        page.wait_for_timeout(2000)
+        soft_scroll(page, steps=2)
+        # versuche DOM links
+        link = page.locator('a[href*="/p/"], a[href*="/reel/"]').first.get_attribute("href")
+        if link:
+            if link.startswith("/"):
+                return "https://www.instagram.com" + link.split("?")[0], "latest ig post link found"
+            return link.split("?")[0], "latest ig post link found"
+    except Exception:
+        pass
+
+    # Fallback regex
+    html2 = page.content()
+    m = re.search(r'href="(/(p|reel)/[^"/]+/)"', html2, re.IGNORECASE)
+    if m:
+        return "https://www.instagram.com" + m.group(1), "latest ig post link (regex)"
+    return None, "no latest link found"
+
+
+def latest_tiktok(page):
+    html = page.content().lower()
+    if looks_blocked_text(page.content()) or "verify" in html or "captcha" in html:
+        return None, "blocked/consent/login suspected"
+
+    try:
+        page.wait_for_timeout(2000)
+        soft_scroll(page, steps=3)
+        link = page.locator('a[href*="/video/"]').first.get_attribute("href")
+        if link:
+            if link.startswith("/"):
+                return "https://www.tiktok.com" + link.split("?")[0], "latest tiktok link found"
+            return link.split("?")[0], "latest tiktok link found"
+    except Exception:
+        pass
+
+    html2 = page.content()
+    m = re.search(r'href="(/@[^"]+/video/\d+)"', html2, re.IGNORECASE)
+    if m:
+        return "https://www.tiktok.com" + m.group(1), "latest tiktok link (regex)"
+    return None, "no latest link found"
+
+
+def latest_linkedin(page):
+    html = page.content().lower()
+    if looks_blocked_text(page.content()) or "sign in" in html or "anmelden" in html:
+        return None, "blocked/consent/login suspected"
+
+    # LinkedIn Company Posts sind oft dynamisch und blocken; wir versuchen Post-Links
+    try:
+        page.wait_for_timeout(2500)
+        soft_scroll(page, steps=3)
+        # Versuch: feed/update links
+        link = page.locator('a[href*="urn:li:activity"], a[href*="/feed/update/"]').first.get_attribute("href")
+        if link:
+            if link.startswith("/"):
+                return "https://www.linkedin.com" + link.split("?")[0], "latest linkedin link found"
+            return link.split("?")[0], "latest linkedin link found"
+    except Exception:
+        pass
+
+    html2 = page.content()
+    m = re.search(r'(https://www\.linkedin\.com/feed/update/urn:li:activity:\d+[^"\']*)', html2, re.IGNORECASE)
+    if m:
+        return m.group(1), "latest linkedin link (regex)"
+    return None, "no latest link found"
+
+
+def latest_youtube_shorts(page):
+    # YouTube: /shorts/ID
+    try:
+        page.wait_for_timeout(1500)
+        soft_scroll(page, steps=2)
+        link = page.locator('a[href^="/shorts/"]').first.get_attribute("href")
+        if link:
+            return "https://www.youtube.com" + link.split("?")[0], "latest shorts link found"
+    except Exception:
+        pass
+
+    html = page.content()
+    m = re.search(r'href="(/shorts/[^"?]+)"', html, re.IGNORECASE)
+    if m:
+        return "https://www.youtube.com" + m.group(1), "latest shorts link (regex)"
+    return None, "no latest link found"
+
+
+def shorts_to_watch(url: str):
+    if "/shorts/" in url:
+        vid = url.split("/shorts/")[1].split("?")[0].split("&")[0]
+        if vid:
+            return f"https://www.youtube.com/watch?v={vid}"
+    return None
+
+
+def latest_blog(page):
+    # Blogs: first article link
+    html = page.content()
+    # DOM zuerst
+    try:
+        link = page.locator("article a[href]").first.get_attribute("href")
+        if link:
+            return link.split("?")[0], "latest blog link found"
+    except Exception:
+        pass
+
+    # regex fallback
+    m = re.search(r'<article[\s\S]*?<a[^>]+href="([^"]+)"', html, re.IGNORECASE)
+    if m:
+        return m.group(1).split("?")[0], "latest blog link (regex)"
+    m2 = re.search(r'href="([^"]+/20\d{2}/[^"]+)"', html, re.IGNORECASE)
+    if m2:
+        return m2.group(1).split("?")[0], "latest blog link (regex2)"
+    return None, "no latest link found"
+
+
+def get_latest(page, stype: str):
+    if stype == "x":
+        return latest_x(page)
+    if stype == "instagram":
+        return latest_instagram(page)
+    if stype == "tiktok":
+        return latest_tiktok(page)
+    if stype == "linkedin":
+        return latest_linkedin(page)
+    if stype == "youtube_shorts":
+        return latest_youtube_shorts(page)
+    if stype == "blog":
+        return latest_blog(page)
+    return None, "unknown type"
 
 
 def check_one(page, source):
@@ -198,55 +309,51 @@ def check_one(page, source):
     last_note = ""
     for attempt in range(CONFIG["retries"] + 1):
         try:
-            goto_with_soft_handling(page, url)
-            html = page.content()
+            goto(page, url)
+            # bei dynamischen Seiten: kurz network idle simulieren
+            page.wait_for_timeout(1500)
 
-            latest_url = extract_latest_url(stype, html)
-
+            latest_url, note = get_latest(page, stype)
             if not latest_url:
-                if looks_blocked(html):
-                    last_note = "blocked/consent/login suspected"
-                    # retry bei block
+                # debug dump für Socials hilft enorm
+                safe_write_debug(page, source["id"], "profile")
+                # wenn note block-like -> warn
+                if "blocked" in note:
+                    last_note = note
                     continue
-                return {"status": "missing", "latest_url": None, "published_at": None, "note": "no latest link found"}
+                return {"status": "missing", "latest_url": None, "published_at": None, "note": note}
 
-            # Neuesten Post öffnen und Published Time suchen
+            # Jetzt Post öffnen + Zeit extrahieren (DOM time tag, sehr robust)
             published_at = None
 
-            # YouTube: Erst /shorts/ öffnen, dann fallback auf watch?v=
+            # YouTube Shorts: zusätzlich watch?v=… öffnen, um date/time zuverlässiger zu bekommen
             if stype == "youtube_shorts":
-                try:
-                    goto_with_soft_handling(page, latest_url)
-                    post_html = page.content()
-                    published_at = extract_published_datetime(post_html)
-                except Exception:
-                    published_at = None
+                # zuerst shorts
+                goto(page, latest_url)
+                published_at = published_time_from_time_tag(page)
 
                 if not published_at:
-                    watch_url = youtube_shorts_to_watch(latest_url)
-                    if watch_url:
-                        try:
-                            goto_with_soft_handling(page, watch_url)
-                            post_html = page.content()
-                            published_at = extract_published_datetime(post_html)
-                            # wenn watch_url brauchbarer ist, auch Link umstellen:
-                            if published_at:
-                                latest_url = watch_url
-                        except Exception:
-                            published_at = None
+                    watch = shorts_to_watch(latest_url)
+                    if watch:
+                        goto(page, watch)
+                        published_at = published_time_from_time_tag(page)
+                        if published_at:
+                            latest_url = watch
+
             else:
-                try:
-                    goto_with_soft_handling(page, latest_url)
-                    post_html = page.content()
-                    published_at = extract_published_datetime(post_html)
-                except Exception:
-                    published_at = None
+                goto(page, latest_url)
+                published_at = published_time_from_time_tag(page)
+
+            # Wenn Social blockt auf Post-Seite: debug speichern
+            if looks_blocked_text(page.content()):
+                safe_write_debug(page, source["id"], "post")
+                last_note = "blocked/consent/login suspected"
+                continue
 
             now_b = datetime.now(TZ)
             win_start, win_end, expected = expected_window(now_b)
 
             if published_at:
-                # "heute" und innerhalb toleranzfenster (>= win_start)
                 ok = (published_at.date() == now_b.date()) and (published_at >= win_start)
                 return {
                     "status": "ok" if ok else "missing",
@@ -255,7 +362,7 @@ def check_one(page, source):
                     "note": "published time found"
                 }
 
-            # Kein Timestamp -> nicht rot, sondern warn (Link gefunden, aber nicht sicher)
+            # Kein Timestamp → warn (nicht rot)
             return {
                 "status": "warn",
                 "latest_url": latest_url,
@@ -265,12 +372,13 @@ def check_one(page, source):
 
         except PwTimeout:
             last_note = "timeout"
+            safe_write_debug(page, source["id"], f"timeout_{attempt}")
             continue
         except Exception as e:
             last_note = f"error: {type(e).__name__}"
+            safe_write_debug(page, source["id"], f"error_{attempt}")
             continue
 
-    # Wenn alle Versuche scheitern:
     return {"status": "warn", "latest_url": None, "published_at": None, "note": last_note or "warn"}
 
 
@@ -291,7 +399,7 @@ def main():
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled"
+                "--disable-blink-features=AutomationControlled",
             ]
         )
 
@@ -299,6 +407,9 @@ def main():
             user_agent=DESKTOP_UA,
             viewport={"width": 1365, "height": 900},
             locale="de-DE",
+            extra_http_headers={
+                "Accept-Language": "de-DE,de;q=0.9,en;q=0.8"
+            }
         )
 
         page = context.new_page()
@@ -327,7 +438,6 @@ def main():
 
         browser.close()
 
-    # docs/status.json aktualisieren
     with open("docs/status.json", "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
 
