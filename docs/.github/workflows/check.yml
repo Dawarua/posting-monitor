@@ -1,0 +1,39 @@
+name: Check postings
+
+on:
+  schedule:
+    - cron: "35 16 * * *"  # ~18:35 Berlin (Sommer)
+    - cron: "35 17 * * *"  # ~18:35 Berlin (Winter)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run checker
+        run: |
+          python src/check.py
+
+      - name: Commit updated status.json
+        run: |
+          git config user.name "posting-monitor-bot"
+          git config user.email "posting-monitor-bot@users.noreply.github.com"
+          git add docs/status.json
+          git commit -m "Update status.json" || echo "No changes"
+          git push
