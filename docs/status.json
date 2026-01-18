@@ -1,6 +1,6 @@
 {
   "day_berlin": "2026-01-18",
-  "checked_at_berlin": "2026-01-18 19:13:45",
+  "checked_at_berlin": "2026-01-18 19:28:22",
   "expected_time_berlin": "2026-01-18 18:00",
   "sources": [
     {
@@ -8,10 +8,10 @@
       "name": "X @utradetoken",
       "type": "x",
       "url": "https://x.com/utradetoken",
-      "status": "warn",
-      "latest_url": null,
-      "published_at_berlin": null,
-      "note": "blocked/consent/login suspected"
+      "status": "missing",
+      "latest_url": "https://x.com/uTradetoken/status/1996951900780999093",
+      "published_at_berlin": "2025-12-05 15:36",
+      "note": "published time found"
     },
     {
       "id": "ig",
