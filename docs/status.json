@@ -1,7 +1,7 @@
 {
-  "day_berlin": "2026-01-28",
-  "checked_at_berlin": "2026-01-28 18:56:33",
-  "expected_time_berlin": "2026-01-28 18:00",
+  "day_berlin": "2026-01-29",
+  "checked_at_berlin": "2026-01-29 19:04:36",
+  "expected_time_berlin": "2026-01-29 18:00",
   "sources": [
     {
       "id": "x",
@@ -18,10 +18,10 @@
       "name": "Instagram @utradetoken",
       "type": "instagram",
       "url": "https://www.instagram.com/utradetoken",
-      "status": "warn",
+      "status": "missing",
       "latest_url": null,
       "published_at_berlin": null,
-      "note": "blocked/consent/login suspected"
+      "note": "no latest link found"
     },
     {
       "id": "tt",
